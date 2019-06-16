@@ -76,25 +76,31 @@ def do_augmentations(path):
         im_counter += 1
 
 
-def make_dataset(upscale_factor):
+def make_dataset(upscale_factor, batch):
     """
     Creates the superresolution patches placeholder dataset.
     """
     # make placeholders
-    training_batches = tf.placeholder_with_default(tf.constant(32, dtype=tf.int64), shape=[], name="batch_size_input")
+    training_batches = tf.placeholder_with_default(tf.constant(batch, dtype=tf.int64), shape=[], name="batch_size_input")
     path_inputs = tf.placeholder(tf.string, shape=[None])
 
     # make dataset
     path_dataset = tf.data.Dataset.from_tensor_slices(path_inputs)
-    train_dataset = path_dataset.flat_map(lambda x: load_image(x, upscale_factor))
-    train_dataset = train_dataset.shuffle(buffer_size=(91*20)) #91-image dataset times augmentations
+    train_dataset = path_dataset.flat_map(lambda x: data_tensor_slices(load_image(x, upscale_factor)))
+    train_dataset = train_dataset.shuffle(buffer_size=(1820)) #91-image dataset times augmentations
     train_dataset = train_dataset.batch(training_batches)
 
-    return train_dataset
+    return path_inputs, training_batches, train_dataset
+
+def data_tensor_slices((x,y)):
+    """
+    Returns a tensorflow dataset from images patches.
+    """
+    return tf.data.Dataset.from_tensor_slices((x, y))
 
 def load_image(path, scale):
     """
-    Loads an image into proper patches.
+    Loads an image into proper low res and corresponding high res patches.
     """
     # init
     channels = 1
@@ -115,12 +121,15 @@ def load_image(path, scale):
     R, G, B = tf.unstack(im, 3, axis=2)
 
     # multiply by ?
+    # TODO: calculate mean and std of each dataset
     y = R * 0.299 + G * 0.587 + B * 0.114
     print("y.shape: ")
     print(y.shape)
 
+    R = R * 0.299
     # shape to 1 channel and normalize
-    im = tf.reshape(y, (tf.shape(im)[0], tf.shape(im)[1], 1)) / 255
+    # TODO: which channel should i train on ?
+    im = tf.reshape(R, (tf.shape(im)[0], tf.shape(im)[1], 1)) / 255
     print("im.shape: ")
     print(im.shape)
 
@@ -176,4 +185,5 @@ def load_image(path, scale):
     print(HR_image_patches.shape)
     print("\n")
 
-    return tf.data.Dataset.from_tensor_slices((LR_image_patches, HR_image_patches))
+    return (LR_image_patches, HR_image_patches)
+    #return tf.data.Dataset.from_tensor_slices((LR_image_patches, HR_image_patches))
