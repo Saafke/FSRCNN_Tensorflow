@@ -20,12 +20,16 @@ def model(LR_input, HR_output, scale, batch, lr, (d, s, m)):
     Implementation of FSRCNN: http://mmlab.ie.cuhk.edu.hk/projects/FSRCNN.html
     Parameters
     ----------
-    scale: int
-        super-resolution scale
     LR_input:
         input LR dataset
     HR_output:
         output HR dataset
+    scale: int
+        super-resolution scale
+    batch:
+        batch-size
+    lr:
+        learning rate
     (d, s, m):
         fsrcnn model parameters
     Returns
@@ -100,12 +104,7 @@ def model(LR_input, HR_output, scale, batch, lr, (d, s, m)):
     print(out.shape)
 
     out = tf.reshape(out, out.shape, name = "NHWC_output")
-    # out = tf.nn.tanh(out, name="NHWC_output")
-    # bsize, a, b, c = l3.get_shape().as_list()
-    # out_nchw = tf.reshape(out, (-1, 1, a * scale, b * scale), name="NCHW_output")
-
     psnr = tf.image.psnr(out, HR_output, max_val=1.0)
-
     loss = tf.losses.mean_squared_error(out, HR_output)
     train_op = tf.train.AdamOptimizer(learning_rate=lr).minimize(loss)
 

@@ -127,7 +127,7 @@ print("IMPROTANT22222:", upsampled_im.shape)
 #np_im = cv2.cvtColor(np_im, cv2.COLOR_BGR2YCrCb)
 
 # get patch
-np_im = np_im[0:10,0:10,:]
+np_im = np_im[0:20,0:20,:]
 print("numpy shape", np_im.shape)
 
 cv2.namedWindow('LR_patch', cv2.WINDOW_NORMAL)
