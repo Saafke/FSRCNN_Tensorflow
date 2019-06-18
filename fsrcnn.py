@@ -89,25 +89,25 @@ def model(LR_input, HR_output, scale, batch, lr, (d, s, m)):
     #x = prelu(x)
     x = tf.nn.relu(x)
     print("expanding layer output.shape: ")
-    print(x.shape[0])
-    print(x.shape[1])
-    print(x.shape[2])
-    print(x.shape[3])
+    print(x.shape)
     
-    output_shape = [batch,int(x.shape[1]*scale), int(x.shape[2]*scale), 1]
+    #output_shape = [x.shape[0],x.shape[1]*scale, x.shape[2]*scale, x.shape[3]]
+    output_shape = LR_input
+    print("output_shape.shape:", output_shape)
     # deconvolution a.k.a. transposed convolution
     #tf.nn.conv2d_transpose(value, filter,output_shape,strides,padding='SAME',data_format='NHWC',name=None)
-    x = tf.nn.conv2d_transpose(x, filters[4+(m-1)], output_shape, [1, scale, scale, 1], padding='SAME', name="deconv")
+    x = tf.nn.conv2d_transpose(x, filters[4+(m-1)], output_shape=tf.shape(HR_output), 
+                                                    strides=[1, scale, scale, 1], 
+                                                    padding='SAME', 
+                                                    name="deconv")
     print("deconv successful")
     out = x + bias[4+(m-1)]
     print("deconv out.shape=")
     print(out.shape)
 
-    out = tf.reshape(out, out.shape, name = "NHWC_output")
+    #out = tf.reshape(out, out.shape, name = "NHWC_output")
     psnr = tf.image.psnr(out, HR_output, max_val=1.0)
     loss = tf.losses.mean_squared_error(out, HR_output)
     train_op = tf.train.AdamOptimizer(learning_rate=lr).minimize(loss)
 
     return out, loss, train_op, psnr
-
-

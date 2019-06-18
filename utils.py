@@ -6,6 +6,27 @@ import cv2
 import tensorflow as tf
 import imutils #rotating images properly
 
+def getpaths(path):
+    """
+    Get all image paths from folder 'path'
+    """
+    data = pathlib.Path(path)
+    all_image_paths = list(data.glob('*'))
+    all_image_paths = [str(p) for p in all_image_paths]
+    return all_image_paths
+
+def augment(dataset_path, save_path):
+    if(not os.path.isdir(save_path)):
+        print("Making augmented images...")
+        os.mkdir(save_path)
+
+        utils.do_augmentations(dataset_path)
+        
+        #count new images
+        save_path, dirs, files = next(os.walk(save_path))
+        file_count = len(files)
+        print("{} augmented images are stored in the folder {}".format(file_count, save_path))
+
 def rotate(img):
     """
     Function that rotates an image 90 degrees 4 times.
@@ -34,7 +55,7 @@ def downscale(img):
 
     return img, img09, img08, img07, img06
 
-def augment(img):
+def augment_image(img):
     """
     Rotates and downscales an image. Creates 20x images.
     """
@@ -68,7 +89,7 @@ def do_augmentations(path):
 
         augm_counter = 0
         # get augmented images
-        augmented_images = augment(img)
+        augmented_images = augment_image(img)
         for im in augmented_images: #save them all to ./augmented
             x = Image.fromarray(im)
             x.save("./augmented/img{}aug{}.png".format(im_counter, augm_counter))
@@ -98,54 +119,75 @@ def data_tensor_slices((x,y)):
     """
     return tf.data.Dataset.from_tensor_slices((x, y))
 
-def load_image(path, scale):
+def load_images(paths, scale):
     """
-    Loads an image into proper low res and corresponding high res patches - only Y from YCbCr
+    Loads all images into proper low res and corresponding high res patches - only Y from YCbCr
+
+    Returns:
+    List x and y
     """
-    # init
+    print("Loading images into patches...")
+    # init lists
     x = []
     y = []
-    channels = 1
+    
+    # set lr and hr sizes
     lr_size = 10
     if(scale == 3):
         lr_size = 7
     elif(scale == 4):
         lr_size = 6
 
-    # -- Loading image 
-    im = cv2.imread(path)
-    # convert to YCrCb (cv2 reads images in BGR!), and normalize
-    im_ycc = cv2.cvtColor(im, cv2.COLOR_BGR2YCrCb) / 255.0
+    hr_size = lr_size * scale
+    
+    # loop over all image paths
+    for path in paths:
+        # -- Loading image 
+        im = cv2.imread(path)
+        # convert to YCrCb (cv2 reads images in BGR!), and normalize
+        im_ycc = cv2.cvtColor(im, cv2.COLOR_BGR2YCrCb) / 255.0
 
-    # -- Creating LR and HR images
-    # make current image divisible by scale (because current image is the HR image)
-    im_ycc_hr = im_ycc[0:(im_ycc.shape[0] - (im_ycc.shape[0] % scale)),
-                     0:(im_ycc.shape[1] - (im_ycc.shape[1] % scale)), :]
-    im_ycc_lr = cv2.resize(im_ycc_hr, (int(im_ycc_hr.shape[1] / scale), int(im_ycc_hr.shape[0] / scale)), interpolation=cv2.INTER_CUBIC)
-    # only work on the luminance channel Y
-    lr = im_ycc_lr[:,:,0]
-    hr = im_ycc_hr[:,:,0]
+        # -- Creating LR and HR images
+        # make current image divisible by scale (because current image is the HR image)
+        im_ycc_hr = im_ycc[0:(im_ycc.shape[0] - (im_ycc.shape[0] % scale)),
+                        0:(im_ycc.shape[1] - (im_ycc.shape[1] % scale)), :]
+        im_ycc_lr = cv2.resize(im_ycc_hr, (int(im_ycc_hr.shape[1] / scale), int(im_ycc_hr.shape[0] / scale)), interpolation=cv2.INTER_CUBIC)
+        # only work on the luminance channel Y
+        lr = im_ycc_lr[:,:,0]
+        hr = im_ycc_hr[:,:,0]
 
-    # -- Extract patches from the images
-    numx = int(lr.shape[0] / lr_size)
-    numy = int(lr.shape[1] / lr_size)
+        # -- Extract patches from the images 
+        # TODO: overlapping pixels
+        # TODO: don't round down, i.e. get all patches
+        numx = int(lr.shape[0] / lr_size)
+        numy = int(lr.shape[1] / lr_size)
+        
         for i in range(0, numx):
             startx = i * lr_size
             endx = (i * lr_size) + lr_size
-            startx_hr = i * crop_size_hr
-            endx_hr = (i * crop_size_hr) + crop_size_hr
+            
+            startx_hr = i * hr_size
+            endx_hr = (i * hr_size) + hr_size
+            
             for j in range(0, numy):
                 starty = j * lr_size
                 endy = (j * lr_size) + lr_size
-                starty_hr = j * crop_size_hr
-                endy_hr = (j * crop_size_hr) + crop_size_hr
-                crop_lr = lr_y[startx:endx, starty:endy]
-                crop_hr = hr_y[startx_hr:endx_hr, starty_hr:endy_hr]
-                hr = crop_hr.reshape(((crop_size_hr), (crop_size_hr), 1))
-                lr = crop_lr.reshape((lr_size, lr_size, 1))
-                x.append(lr)
-                y.append(hr)
+                
+                starty_hr = j * hr_size
+                endy_hr = (j * hr_size) + hr_size
 
+                crop_lr = lr[startx:endx, starty:endy]
+                crop_hr = hr[startx_hr:endx_hr, starty_hr:endy_hr]
+
+                label = crop_hr.reshape(((hr_size), (hr_size), 1))
+                inpt = crop_lr.reshape((lr_size, lr_size, 1))
+                
+                #label = np.expand_dims(label, axis=0)
+                #inpt = np.expand_dims(inpt, axis=0)
+
+                x.append(inpt)
+                y.append(label)
+    print("Images loaded.")
     return x, y
 
 def load_image_old(path, scale):
