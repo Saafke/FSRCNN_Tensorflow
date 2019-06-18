@@ -20,11 +20,12 @@ def augment(dataset_path, save_path):
         print("Making augmented images...")
         os.mkdir(save_path)
 
-        utils.do_augmentations(dataset_path)
+        do_augmentations(dataset_path, save_path)
         
         #count new images
         save_path, dirs, files = next(os.walk(save_path))
         file_count = len(files)
+        
         print("{} augmented images are stored in the folder {}".format(file_count, save_path))
 
 def rotate(img):
@@ -71,12 +72,12 @@ def augment_image(img):
 
     return augmented_images
 
-def do_augmentations(path):
+def do_augmentations(dataset_path, save_path):
     """
     Does augmentations on all images in folder 'path'.
     """
     # get all image paths from folder
-    dir = pathlib.Path(path)
+    dir = pathlib.Path(dataset_path)
     all_image_paths = list(dir.glob('*'))
     all_image_paths = [str(x) for x in all_image_paths]
 
@@ -92,7 +93,7 @@ def do_augmentations(path):
         augmented_images = augment_image(img)
         for im in augmented_images: #save them all to ./augmented
             x = Image.fromarray(im)
-            x.save("./augmented/img{}aug{}.png".format(im_counter, augm_counter))
+            x.save(save_path + "/img{}aug{}.png".format(im_counter, augm_counter))
             augm_counter += 1
         im_counter += 1
 
@@ -150,8 +151,9 @@ def load_images(paths, scale):
         # -- Creating LR and HR images
         # make current image divisible by scale (because current image is the HR image)
         im_ycc_hr = im_ycc[0:(im_ycc.shape[0] - (im_ycc.shape[0] % scale)),
-                        0:(im_ycc.shape[1] - (im_ycc.shape[1] % scale)), :]
-        im_ycc_lr = cv2.resize(im_ycc_hr, (int(im_ycc_hr.shape[1] / scale), int(im_ycc_hr.shape[0] / scale)), interpolation=cv2.INTER_CUBIC)
+                           0:(im_ycc.shape[1] - (im_ycc.shape[1] % scale)), :]
+        im_ycc_lr = cv2.resize(im_ycc_hr, (int(im_ycc_hr.shape[1] / scale), int(im_ycc_hr.shape[0] / scale)), 
+                           interpolation=cv2.INTER_CUBIC)
         # only work on the luminance channel Y
         lr = im_ycc_lr[:,:,0]
         hr = im_ycc_hr[:,:,0]

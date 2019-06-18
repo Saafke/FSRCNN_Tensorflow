@@ -4,17 +4,18 @@ import cv2
 import numpy as np
 
 class run:
-    def __init__(self, config, LR_holder, HR_holder):
+    def __init__(self, config, ckpt_path, LR_holder, HR_holder):
         self.config = config
         self.LR_holder = LR_holder
         self.HR_holder = HR_holder
+        self.ckpt_path = ckpt_path
 
     def train(self, X, Y, epochs, batch, load_flag, model_outputs):
         out, loss, train_op, psnr = model_outputs
         
         nr_training_instances = len(X)
         num_of_batches = nr_training_instances//batch
-        print("Number of batches:", num_of_batches)
+        print("Number of batches: {}".format(num_of_batches))
 
         # -- Training session
         with tf.Session(config=self.config) as sess:
@@ -26,12 +27,12 @@ class run:
             saver = tf.train.Saver()
             
             # Create check points directory
-            if not os.path.exists("./CKPT_dir"):
-                os.makedirs("./CKPT_dir")
+            if not os.path.exists(self.ckpt_path):
+                os.makedirs(self.ckpt_path)
             else:
-                if os.path.isfile("./CKPT_dir/fsrcnn_ckpt" + ".meta"):
+                if os.path.isfile(self.ckpt_path + "fsrcnn_ckpt" + ".meta"):
                     if load_flag:
-                        saver.restore(sess, tf.train.latest_checkpoint("./CKPT_dir"))
+                        saver.restore(sess, tf.train.latest_checkpoint(self.ckpt_path))
                         print("Loaded checkpoint.")
                     if not load_flag:
                         print("No checkpoint loaded. Training from scratch.")
@@ -65,31 +66,40 @@ class run:
                         total_psnr += p
                     total_psnr /= batch
 
-                    print("Epoch no: [{}/{}] - Average Loss: {:.5f} - Average PSNR: {:.3f} \n".format(e,
+                    print("Epoch no: [{}/{}] - Average Loss: {:.5f} - Average PSNR: {:.3f}".format(e,
                                                                                                    epochs,
                                                                                                    float(train_loss/num_of_batches),
                                                                                                    float(total_psnr/num_of_batches)))
+                    # #to check if upscaled properly
+                    # print("output.shape:", o.shape)
 
                     # Save (tensorflow variables are only alive within the session, so we should save within the session)
-                    save_path = saver.save(sess, "./CKPT_dir/fsrcnn_ckpt")
+                    save_path = saver.save(sess, self.ckpt_path + "fsrcnn_ckpt")
                 except tf.errors.OutOfRangeError:
                     pass
 
             print("Training finished.")
             train_writer.close()
 
-    def test(self, out):
-        print("Testing...")
+    def test(self, test_image_path, out, scale):
 
         # Init
-        scale = 2
         lr_size = 10
-        hr_size = 10 * scale
+        if(scale == 3):
+            lr_size = 7
+        elif(scale == 4):
+            lr_size = 6
+        
+        hr_size = lr_size * scale
 
         # Load image
-        test_image_path = "/home/weber/Documents/gsoc/datasets/BSDS100/41069.png"
         np_im = cv2.imread(test_image_path, 3)
-        upsampled_np_im = cv2.resize(np_im, (np_im.shape[1]*2, np_im.shape[0]*2), interpolation=cv2.INTER_CUBIC)
+        # make it divisible by scale
+        #print("np_im.shape:", np_im.shape)
+        #np_im = np_im[0:(np_im.shape[0] - (np_im.shape[0] % 2)), 0:(np_im.shape[1] - (np_im.shape[1] % 2)), :]
+        #print("np_im.shape:", np_im.shape)
+        
+        upsampled_np_im = cv2.resize(np_im, (np_im.shape[1]*scale, np_im.shape[0]*scale), interpolation=cv2.INTER_CUBIC)
 
         # Prepare image for loading into neural network
         np_im_ycc = cv2.cvtColor(np_im, cv2.COLOR_BGR2YCrCb)
@@ -109,15 +119,17 @@ class run:
             with tf.Session(config=self.config) as sess:
 
                 ### Restore checkpoint
-                ckpt_name = "./CKPT_dir/fsrcnn_ckpt" + ".meta"
-                saver = tf.train.Saver(tf.all_variables())
+                ckpt_name = self.ckpt_path + "fsrcnn_ckpt" + ".meta"
+                saver = tf.train.Saver(tf.global_variables())
                 saver = tf.train.import_meta_graph(ckpt_name)
-                saver.restore(sess, tf.train.latest_checkpoint("./CKPT_dir"))
+                saver.restore(sess, tf.train.latest_checkpoint(self.ckpt_path))
                 print("Loaded model for testing.")
-
+                
+                print("Testing...")
                 # Get prediction
                 output = sess.run(out, feed_dict={self.LR_holder: LR_input_, self.HR_holder: HR_input_})
-                
+                print("Testing finished.")
+               
                 # Denormalize and cast to int
                 Y = output[0] * 255
                 Y = Y.astype(np.uint8)
