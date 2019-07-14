@@ -1,7 +1,7 @@
 # FSRCNN_Tensorflow
-Tensorflow implementation of [FSRCNN](http://mmlab.ie.cuhk.edu.hk/projects/FSRCNN.html) [1].
+Tensorflow implementation of [Accelerating the Super-Resolution Convolutional Neural Network](http://mmlab.ie.cuhk.edu.hk/projects/FSRCNN.html) [1].
 
-Still under development...
+Includes pretrained models for scales x2, x3 and x4. Which were trained on T91-image dataset, and finetuned on General100 dataset.
 
 ## Dependencies
 - Tensorflow
@@ -12,7 +12,7 @@ Still under development...
 
 ## How to run
 
-###### training:
+###### Training:
 `python main.py --T91_dir <T91-image dataset directory> --train --fromscratch`
 
 This will create the T91 augmented dataset and train from scratch.
@@ -21,7 +21,7 @@ This will create the T91 augmented dataset and train from scratch.
 
 This will create a FSRCNN-small network and train from scratch.
 
-###### finetuning:
+###### Finetuning:
 `python main.py --general100_dir <general100 dataset directory> --train --finetune`
 
 This will 
@@ -29,20 +29,20 @@ This will
 - create augmented general100 dataset (if it not exists yet)
 - resume training but now on the augmented general100 dataset
 
-###### testing:
+###### Testing:
 `python main.py --test`
 
-###### exporting file to .pb format:
+###### Exporting file to .pb format:
 `python3 main.py --export`
 
-###### extra arguments (different scale, batch-sizes etc.)
+###### Extra arguments (different scale, batch-sizes etc.)
 `python main.py --h`
 
 ## Example
-(1) Original picture
-(2) Input image
-(3) Bicubic scaled (3x) image
-(4) ESPCN scaled (3x) image
+(1) Original picture\
+(2) Input image\
+(3) Bicubic scaled (3x) image\
+(4) ESPCN scaled (3x) image\
 ![Alt text](images/original.png?raw=true "Original picture")
 ![Alt text](images/input.png?raw=true "Input image picture")
 ![Alt text](images/bicubicOutput.png?raw=true "Bicubic picture")
