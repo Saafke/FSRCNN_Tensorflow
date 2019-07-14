@@ -42,7 +42,7 @@ This will
 (1) Original picture\
 (2) Input image\
 (3) Bicubic scaled (3x) image\
-(4) ESPCN scaled (3x) image\
+(4) FSRCNN scaled (3x) image\
 ![Alt text](images/original.png?raw=true "Original picture")
 ![Alt text](images/input.png?raw=true "Input image picture")
 ![Alt text](images/bicubicOutput.png?raw=true "Bicubic picture")
