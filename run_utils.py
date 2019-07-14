@@ -6,6 +6,10 @@ import math
 import utils
 from skimage import io
 
+from tensorflow.python.tools import freeze_graph
+from tensorflow.python.tools import optimize_for_inference_lib
+from tensorflow.tools.graph_transforms import TransformGraph
+
 class run:
     def __init__(self, config, ckpt_path, LR_holder, HR_holder):
         self.config = config
@@ -93,7 +97,7 @@ class run:
         else:
             ("Input is neither image or directory.")
             return
-            
+
         # Init
         lr_size = 10
         if(scale == 3):
@@ -174,6 +178,42 @@ class run:
 
         print("Displaying results of last image in dataset...")
         self.show_images(input_im, np_im, upscaled_bicubic, HR_image)
+
+        cv2.imwrite('./images/original.png',np_im)
+        cv2.imwrite('./images/fsrcnnOutput.png',HR_image)
+        cv2.imwrite('./images/bicubicOutput.png',upscaled_bicubic)
+        cv2.imwrite('./images/input.png',input_im)
+
+    def export(self, scale):
+        print("Exporting model.")
+
+        graph = tf.get_default_graph()
+        with graph.as_default():
+            with tf.Session(config=self.config) as sess:
+                
+                ### Restore checkpoint
+                ckpt_name = self.ckpt_path + "fsrcnn_ckpt" + ".meta"
+                saver = tf.train.Saver(tf.global_variables())
+                saver = tf.train.import_meta_graph(ckpt_name)
+                saver.restore(sess, tf.train.latest_checkpoint(self.ckpt_path))
+
+                # Return a serialized GraphDef representation of this graph
+                graph_def = sess.graph.as_graph_def()
+
+                # All variables to constants
+                graph_def = tf.graph_util.convert_variables_to_constants(sess, graph_def, ['NCHW_output'])
+                
+                # Optimize for inference
+                graph_def = optimize_for_inference_lib.optimize_for_inference(graph_def, ["images"],
+                                                                            ["NCHW_output"],  # ["NHWC_output"],
+                                                                            tf.float32.as_datatype_enum)
+
+                graph_def = TransformGraph(graph_def, ["images"], ["NCHW_output"], ["sort_by_execution_order"])
+
+                with tf.gfile.FastGFile('frozen_inference_graph_opt.pb', 'wb') as f:
+                    f.write(graph_def.SerializeToString())
+
+                tf.train.write_graph(graph_def, ".", 'train.pbtxt')
 
     def show_images(self, lr, hr_orig, hr_cubic, hr_nn):
         # Make windows

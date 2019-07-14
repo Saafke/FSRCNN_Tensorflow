@@ -18,11 +18,12 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' #gets rid of avx/fma warning
 # [DONE] finetune on general100 
 # [DONE] add argument for fsrcnn-small
 # [DONE] Fix white/black specks
-# Export model to .pb file
-# Overlapping patches 
-# Move to this project's master branch
-# Remove old code
 # [DONE] Provide testcode for comparing with bilinear/bicubic
+# [DONE] Function to export model to .pb file
+# [DONE] Move to this project's master branch
+# Fix tf.shape so it can export properly
+# Overlapping patches 
+# Remove old code
 # seperate learning rate for deconv layer
 # switch out deconv layer for different models
 # train models for all different upscale factors
@@ -31,6 +32,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', help='Train the model', action="store_true")
     parser.add_argument('--test', help='Run tests on the model', action="store_true")
+    parser.add_argument('--export', help='Export the model as .pb', action="store_true")
     parser.add_argument('--fromscratch', help='Load previous model for training',action="store_false")
     parser.add_argument('--finetune', help='Finetune model on General100 dataset',action="store_true")
     parser.add_argument('--small', help='Run FSRCNN-small', action="store_true")
@@ -42,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument('--d', type=int, help='Variable for d', default=56)
     parser.add_argument('--s', type=int, help='Variable for s', default=12)
     parser.add_argument('--m', type=int, help='Variable for m', default=4)
-    parser.add_argument('--T91_dir', help='Path to 91-image dataset')
+    parser.add_argument('--traindir', help='Path to train images')
     parser.add_argument('--general100_dir', help='Path to General100 dataset')
 
     args = parser.parse_args()
@@ -55,11 +57,11 @@ if __name__ == "__main__":
     finetune = args.finetune
     learning_rate = args.lr
     load_flag = args.fromscratch
-    T91_dir = args.T91_dir
+    traindir = args.traindir
     general100_dir = args.general100_dir 
     test_image = args.image
 
-    dataset_path = T91_dir
+    dataset_path = traindir
     augmented_path = "./augmented"
     small = args.small
 
@@ -92,10 +94,11 @@ if __name__ == "__main__":
     # Dynamic placeholders
     LR_holder = tf.placeholder(tf.float32, [None, None, None, 1], name='images')
     HR_holder = tf.placeholder(tf.float32, [None, None, None, 1], name='labels')
-
+    HR_holder_shape = tf.shape(HR_holder)
+    
     # -- Model
     # construct model
-    out, loss, train_op, psnr = fsrcnn.model(LR_holder, HR_holder, scale, batch, learning_rate, fsrcnn_params)
+    out, loss, train_op, psnr = fsrcnn.model(LR_holder, HR_holder, HR_holder_shape, scale, batch, learning_rate, fsrcnn_params)
 
     # Create run instance
     run = run_utils.run(config, ckpt_path, LR_holder, HR_holder)
@@ -120,4 +123,6 @@ if __name__ == "__main__":
         # Test image
         run.test_compare(test_image, out, scale)
 
+    if args.export:
+        run.export(scale)
     print("I ran successfully.")

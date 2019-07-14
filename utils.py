@@ -56,6 +56,7 @@ def downscale(img):
 
     return img, img09, img08, img07, img06
 
+
 def augment_image(img):
     """
     Rotates and downscales an image. Creates 20x images.

@@ -17,7 +17,7 @@ def prelu(_x, name):
 
     return pos + neg
 
-def model(LR_input, HR_output, scale, batch, lr, (d, s, m)):
+def model(LR_input, HR_output, HR_holdershape, scale, batch, lr, (d, s, m)):
     """
     Implementation of FSRCNN: http://mmlab.ie.cuhk.edu.hk/projects/FSRCNN.html
     Parameters
@@ -64,7 +64,6 @@ def model(LR_input, HR_output, scale, batch, lr, (d, s, m)):
     x = tf.nn.conv2d(LR_input, filters[0], [1, 1, 1, 1], padding='SAME', name="conv1")
     x = x + bias[0]
     x = prelu(x, "alpha1")
-    #x = tf.nn.relu(x)
     if debug:
         x = tf.Print(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]], "feature extraction output: ")
 
@@ -72,7 +71,6 @@ def model(LR_input, HR_output, scale, batch, lr, (d, s, m)):
     x = tf.nn.conv2d(x, filters[1], [1, 1, 1, 1], padding='SAME', name="conv2")
     x = x + bias[1]
     x = prelu(x, "alpha2")
-    #x = tf.nn.relu(x)
     if debug:
         x = tf.Print(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]], "shrinking layer output:")
 
@@ -81,7 +79,6 @@ def model(LR_input, HR_output, scale, batch, lr, (d, s, m)):
         x = tf.nn.conv2d(x, filters[2+i], [1, 1, 1, 1], padding='SAME', name="conv%d" % (3+i))
         x = x + bias[2+i]
         x = prelu(x, "alpha{}".format(3+i))
-        #x = tf.nn.relu(x)
     if debug:
         x = tf.Print(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]], "n-l mapping layer output: ")
 
@@ -89,18 +86,42 @@ def model(LR_input, HR_output, scale, batch, lr, (d, s, m)):
     x = tf.nn.conv2d(x, filters[3+(m-1)], [1, 1, 1, 1], padding='SAME', name="conv%d" % (3+m))
     x = x + bias[3+(m-1)]
     x = prelu(x, "alpha{}".format(3+m))
-    #x = tf.nn.relu(x)
     if debug:
         x = tf.Print(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]], "expanding layer output: ")
     
-    #output_shape = LR_input
+    #my_outputshape = tf.get_variable('myoutputshape', shape = [None, None, None, 1], dtype = tf.float32)
+    #tf.convert_to_tensor([None, None , None, 1], dtype=tf.float32)
     # deconvolution a.k.a. transposed convolution
-    #tf.nn.conv2d_transpose(value, filter,output_shape,strides,padding='SAME',data_format='NHWC',name=None)
-    x = tf.nn.conv2d_transpose(x, filters[4+(m-1)], output_shape=tf.shape(HR_output), 
-                                                    strides=[1, scale, scale, 1], 
-                                                    padding='SAME', 
-                                                    name="deconv")
-    out = x + bias[4+(m-1)]
+    #print("THIS", tf.stack(x.get_shape().as_list()))
+    #print("tf.shape:", tf.shape(HR_output))
+    #x = tf.Print(x,[x],"printing x before conv2d_tranpose")
+    x = tf.contrib.layers.conv2d_transpose(x,
+    1,
+    kernel_size=[9,9],
+    stride=scale,
+    padding='SAME',
+    data_format="NHWC",
+    activation_fn=tf.nn.relu
+    )
+    # x = tf.nn.conv2d_transpose(x, filters[4+(m-1)], output_shape=HR_holdershape,
+    #                                                 strides=[1, scale, scale, 1], 
+    #                                                 padding='SAME', 
+    #                                                 name="deconv")
+
+    # ======= Transposed convolution using conv2d =======
+    #n_filters = 56
+    #transposed_weights = np.zeros((9,9,n_filters,1),dtype=float)
+    #transposed_weights = tf.transpose(filters[4+(m-1)], perm=[0, 1, 3, 2])
+    #transposed_weights = tf.cast(transposed_weights,tf.float32)
+
+    #x = tf.nn.conv2d(x, transposed_weights, [1, 1, 1, 1], padding='SAME', name="deconv")
+    # ===================================================
+    
+    #x = tf.Print(x,[x],"printing x add bias")
+    
+    out = tf.nn.bias_add(x, bias[4+(m-1)], name = "NCHW_output")
+    #out = x + bias[4+(m-1)]
+
     if debug:
         out = tf.Print(out, [tf.shape(out)[0], tf.shape(out)[1], tf.shape(out)[2], tf.shape(out)[3]], "deconv layer output: ")
 
