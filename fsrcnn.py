@@ -5,48 +5,21 @@ import tensorflow as tf
 import numpy as np 
 import os
 
-def prelu(_x, name):
+def model(x, y, lr_size, scale, batch, lr, (d, s, m)):
     """
-    Parametric ReLU
+    Implementation of FSRCNN: http://mmlab.ie.cuhk.edu.hk/projects/FSRCNN.html.
     """
-    alphas = tf.get_variable(name, _x.get_shape()[-1],
-                       initializer=tf.constant_initializer(0.1),
-                        dtype=tf.float32, trainable=True)
-    pos = tf.nn.relu(_x)
-    neg = alphas * (_x - abs(_x)) * 0.5
-
-    return pos + neg
-
-def model(LR_input, HR_output, HR_holdershape, scale, batch, lr, (d, s, m)):
-    """
-    Implementation of FSRCNN: http://mmlab.ie.cuhk.edu.hk/projects/FSRCNN.html
-    Parameters
-    ----------
-    LR_input:
-        input LR dataset
-    HR_output:
-        output HR dataset
-    scale: int
-        super-resolution scale
-    batch:
-        batch-size
-    lr:
-        learning rate
-    (d, s, m):
-        fsrcnn model parameters
-    Returns
-    ----------
-    Model
-    """
-    debug = False
+    
     channels = 1
+    PS = channels * (scale*scale) # for sub-pixel, PS = Phase Shift
     bias_initializer = tf.constant_initializer(value=0.0)
 
+    # -- Filters and Biases
     filters = [
         tf.Variable(tf.random_normal([5, 5, 1, d], stddev=0.1), name="f1"),           # (f1,n1,c1) = (5,64,1)
         tf.Variable(tf.random_normal([1, 1, d, s], stddev=0.1), name="f2"),           # (f2,n2,c2) = (3,12,56)
         tf.Variable(tf.random_normal([1, 1, s, d], stddev=0.1), name="f%d" % (3 + m)),# (f4,n4,c4) = (1,56,12)
-        tf.Variable(tf.random_normal([9, 9, 1, d], stddev=0.1), name="f%d" % (4 + m)) # (f5,n5,c5) = (9,1,56) 
+        tf.Variable(tf.random_normal([1, 1, d, PS], stddev=0.1), name="f%d" % (4 + m)) # (f5,n5,c5) = (9,1,56) 
     ]
     bias = [
         tf.get_variable(shape=[d], initializer=bias_initializer, name="b1"),
@@ -59,76 +32,58 @@ def model(LR_input, HR_output, HR_holdershape, scale, batch, lr, (d, s, m)):
         filters.insert(i+2, tf.Variable(tf.random_normal([3, 3, s, s], stddev=0.1), name="f%d" % (3+i)))  # (f3,n3,c3) = (3,12,12)
         bias.insert(i+2, tf.get_variable(shape=[s], initializer=bias_initializer, name="b%d" % (3+i)))
 
-    # -- Layers --
+    # -- Model architecture --
     # feature extraction
-    x = tf.nn.conv2d(LR_input, filters[0], [1, 1, 1, 1], padding='SAME', name="conv1")
+    x = tf.nn.conv2d(x, filters[0], [1, 1, 1, 1], padding='SAME', name="conv1")
     x = x + bias[0]
     x = prelu(x, "alpha1")
-    if debug:
-        x = tf.Print(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]], "feature extraction output: ")
-
+  
     # shrinking
     x = tf.nn.conv2d(x, filters[1], [1, 1, 1, 1], padding='SAME', name="conv2")
     x = x + bias[1]
     x = prelu(x, "alpha2")
-    if debug:
-        x = tf.Print(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]], "shrinking layer output:")
-
+  
     # non-linear mapping (amount of layers depends on m)
     for i in range(0,m):
         x = tf.nn.conv2d(x, filters[2+i], [1, 1, 1, 1], padding='SAME', name="conv%d" % (3+i))
         x = x + bias[2+i]
         x = prelu(x, "alpha{}".format(3+i))
-    if debug:
-        x = tf.Print(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]], "n-l mapping layer output: ")
-
+  
     # expanding
     x = tf.nn.conv2d(x, filters[3+(m-1)], [1, 1, 1, 1], padding='SAME', name="conv%d" % (3+m))
     x = x + bias[3+(m-1)]
     x = prelu(x, "alpha{}".format(3+m))
-    if debug:
-        x = tf.Print(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], tf.shape(x)[3]], "expanding layer output: ")
     
-    #my_outputshape = tf.get_variable('myoutputshape', shape = [None, None, None, 1], dtype = tf.float32)
-    #tf.convert_to_tensor([None, None , None, 1], dtype=tf.float32)
-    # deconvolution a.k.a. transposed convolution
-    #print("THIS", tf.stack(x.get_shape().as_list()))
-    #print("tf.shape:", tf.shape(HR_output))
-    #x = tf.Print(x,[x],"printing x before conv2d_tranpose")
-    x = tf.contrib.layers.conv2d_transpose(x,
-    1,
-    kernel_size=[9,9],
-    stride=scale,
-    padding='SAME',
-    data_format="NHWC",
-    activation_fn=tf.nn.relu
-    )
-    # x = tf.nn.conv2d_transpose(x, filters[4+(m-1)], output_shape=HR_holdershape,
+    x = tf.nn.conv2d(x, filters[4+(m-1)], [1, 1, 1, 1], padding='SAME', name="conv%d" % (4+m))
+
+    # transpose
+    # x = tf.nn.conv2d_transpose(x, filters[4+(m-1)], output_shape=[batch,lr_size*scale,lr_size*scale,1],
     #                                                 strides=[1, scale, scale, 1], 
     #                                                 padding='SAME', 
     #                                                 name="deconv")
 
-    # ======= Transposed convolution using conv2d =======
-    #n_filters = 56
-    #transposed_weights = np.zeros((9,9,n_filters,1),dtype=float)
-    #transposed_weights = tf.transpose(filters[4+(m-1)], perm=[0, 1, 3, 2])
-    #transposed_weights = tf.cast(transposed_weights,tf.float32)
+    # sub-pixel
+    x = tf.nn.depth_to_space(x, scale, data_format='NHWC')
+    out = tf.nn.bias_add(x, bias[4+(m-1)], name = "NHWC_output")
+  
+    # -- --
 
-    #x = tf.nn.conv2d(x, transposed_weights, [1, 1, 1, 1], padding='SAME', name="deconv")
-    # ===================================================
-    
-    #x = tf.Print(x,[x],"printing x add bias")
-    
-    out = tf.nn.bias_add(x, bias[4+(m-1)], name = "NCHW_output")
-    #out = x + bias[4+(m-1)]
-
-    if debug:
-        out = tf.Print(out, [tf.shape(out)[0], tf.shape(out)[1], tf.shape(out)[2], tf.shape(out)[3]], "deconv layer output: ")
-
-
-    #out = tf.reshape(out, out.shape, name = "NHWC_output")
-    psnr = tf.image.psnr(out, HR_output, max_val=1.0)
-    loss = tf.losses.mean_squared_error(out, HR_output)
+    # some outputs
+    out_nchw = tf.transpose(out, [0, 3, 1, 2], name="NCHW_output")
+    psnr = tf.image.psnr(out, y, max_val=1.0)
+    loss = tf.losses.mean_squared_error(out, y)
     train_op = tf.train.AdamOptimizer(learning_rate=lr).minimize(loss)
 
     return out, loss, train_op, psnr
+
+def prelu(_x, name):
+    """
+    Parametric ReLU.
+    """
+    alphas = tf.get_variable(name, _x.get_shape()[-1],
+                       initializer=tf.constant_initializer(0.1),
+                        dtype=tf.float32, trainable=True)
+    pos = tf.nn.relu(_x)
+    neg = alphas * (_x - abs(_x)) * 0.5
+
+    return pos + neg

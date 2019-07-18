@@ -1,7 +1,7 @@
 import tensorflow as tf 
 import fsrcnn
-import utils
-import run_utils
+import data_utils
+import run
 import os
 import cv2
 import numpy as np
@@ -14,16 +14,7 @@ from tensorflow.python.client import device_lib
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' #gets rid of avx/fma warning
 
 # TODO: 
-# [DONE] prelu
-# [DONE] finetune on general100 
-# [DONE] add argument for fsrcnn-small
-# [DONE] Fix white/black specks
-# [DONE] Provide testcode for comparing with bilinear/bicubic
-# [DONE] Function to export model to .pb file
-# [DONE] Move to this project's master branch
-# Fix tf.shape so it can export properly
-# Overlapping patches 
-# Remove old code
+# Overlapping patches
 # seperate learning rate for deconv layer
 # switch out deconv layer for different models
 # train models for all different upscale factors
@@ -45,26 +36,27 @@ if __name__ == "__main__":
     parser.add_argument('--s', type=int, help='Variable for s', default=12)
     parser.add_argument('--m', type=int, help='Variable for m', default=4)
     parser.add_argument('--traindir', help='Path to train images')
-    parser.add_argument('--general100_dir', help='Path to General100 dataset')
+    parser.add_argument('--finetunedir', help='Path to finetune images')
+    parser.add_argument('--validdir', help='Path to validation images')
 
     args = parser.parse_args()
 
     # INIT
     scale = args.scale
     fsrcnn_params = (args.d, args.s, args.m) #d,s,m
-    epochs = args.epochs
-    batch = args.batch
-    finetune = args.finetune
-    learning_rate = args.lr
-    load_flag = args.fromscratch
     traindir = args.traindir
-    general100_dir = args.general100_dir 
-    test_image = args.image
 
-    dataset_path = traindir
     augmented_path = "./augmented"
     small = args.small
 
+    lr_size = 10
+    if(scale == 3):
+        lr_size = 7
+    elif(scale == 4):
+        lr_size = 6
+        
+    hr_size = lr_size * scale
+    
     # FSRCNN-small
     if small:
         fsrcnn_params = (32, 5, 1)
@@ -91,38 +83,25 @@ if __name__ == "__main__":
     config = tf.ConfigProto() #log_device_placement=True
     config.gpu_options.allow_growth = True
 
-    # Dynamic placeholders
-    LR_holder = tf.placeholder(tf.float32, [None, None, None, 1], name='images')
-    HR_holder = tf.placeholder(tf.float32, [None, None, None, 1], name='labels')
-    HR_holder_shape = tf.shape(HR_holder)
-    
-    # -- Model
-    # construct model
-    out, loss, train_op, psnr = fsrcnn.model(LR_holder, HR_holder, HR_holder_shape, scale, batch, learning_rate, fsrcnn_params)
-
     # Create run instance
-    run = run_utils.run(config, ckpt_path, LR_holder, HR_holder)
+    run = run.run(config, lr_size, ckpt_path, scale, args.batch, args.epochs, args.lr, args.fromscratch, fsrcnn_params, args.validdir)
 
     if args.train:
-        # If finetune, load model and train on general100
-        if finetune:
-            dataset_path = general100_dir
+        # if finetune, load model and train on general100
+        if args.finetune:
+            traindir = args.finetunedir
             augmented_path = "./augmented_general100"
 
-        # Augment and then load images
-        utils.augment(dataset_path, save_path=augmented_path)
-        all_image_paths = utils.getpaths(augmented_path)
-        X_np, Y_np = utils.load_images(all_image_paths, scale)
+        # augment (if not done before) and then load images 
+        data_utils.augment(traindir, save_path=augmented_path)
 
-        model_outputs = out, loss, train_op, psnr
-
-        # Train
-        run.train(X=X_np, Y=Y_np, epochs=epochs, batch=batch, load_flag=load_flag, model_outputs=model_outputs)
+        run.train(augmented_path)
 
     if args.test:
-        # Test image
-        run.test_compare(test_image, out, scale)
+        run.test(args.image)
+        run.upscale(args.image)
 
     if args.export:
-        run.export(scale)
+        run.export()
+    
     print("I ran successfully.")
