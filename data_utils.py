@@ -59,6 +59,28 @@ def make_dataset(paths, scale):
                 y = crop_hr.reshape((size_hr, size_hr, 1))
                 yield x, y
 
+def make_val_dataset(paths, scale):
+    """
+    Python generator-style dataset for the validation set. Creates input and ground-truth.
+    """
+    for p in paths:
+        # read
+        im = cv2.imread(p.decode(), 3).astype(np.float32)
+        # convert to YCrCb (cv2 reads images in BGR!), and normalize
+        im_ycc = cv2.cvtColor(im, cv2.COLOR_BGR2YCrCb) / 255.0
+        
+        # make current image divisible by scale (because current image is the HR image)
+        im_ycc_hr = im_ycc[0:(im_ycc.shape[0] - (im_ycc.shape[0] % scale)),
+                           0:(im_ycc.shape[1] - (im_ycc.shape[1] % scale)), :]
+        im_ycc_lr = cv2.resize(im_ycc_hr, (int(im_ycc_hr.shape[1] / scale), int(im_ycc_hr.shape[0] / scale)), 
+                           interpolation=cv2.INTER_CUBIC)
+        
+        # only work on the luminance channel Y
+        lr = np.expand_dims(im_ycc_lr[:,:,0], axis=2)
+        hr = np.expand_dims(im_ycc_hr[:,:,0], axis=2)
+        
+        yield lr, hr
+
 def getpaths(path):
     """
     Get all image paths from folder 'path'

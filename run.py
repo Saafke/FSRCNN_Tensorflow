@@ -13,7 +13,7 @@ from tensorflow.python.tools import optimize_for_inference_lib
 from tensorflow.tools.graph_transforms import TransformGraph
 
 class run:
-    def __init__(self, config, lr_size, ckpt_path, scale, batch, epochs, lr, load_flag, fsrcnn_params, validdir):
+    def __init__(self, config, lr_size, ckpt_path, scale, batch, epochs, lr, load_flag, fsrcnn_params, smallFlag, validdir):
         self.config = config
         self.lr_size = lr_size
         self.ckpt_path = ckpt_path
@@ -22,22 +22,41 @@ class run:
         self.epochs = epochs
         self.lr = lr
         self.load_flag = load_flag
-        self.fsrcnn_params = fsrcnn_params 
+        self.fsrcnn_params = fsrcnn_params
+        self.smallFlag = smallFlag
         self.validdir = validdir
     
     def train(self, imagefolder):
         
         # Create training dataset iterator
         image_paths = data_utils.getpaths(imagefolder)
-        dataset = tf.data.Dataset.from_generator(generator=data_utils.make_dataset, 
+        train_dataset = tf.data.Dataset.from_generator(generator=data_utils.make_dataset, 
                                                  output_types=(tf.float32, tf.float32), 
                                                  output_shapes=(tf.TensorShape([None, None, 1]), tf.TensorShape([None, None, 1])),
                                                  args=[image_paths, self.scale])
+        train_dataset = train_dataset.padded_batch(self.batch, padded_shapes=([None, None, 1],[None, None, 1]))
         
-        dataset = dataset.padded_batch(self.batch, padded_shapes=([None, None, 1],[None, None, 1]))
-        iter = dataset.make_initializable_iterator()
-        LR, HR = iter.get_next()
-        
+        # Create validation dataset
+        val_image_paths = data_utils.getpaths(self.validdir)
+        val_dataset = tf.data.Dataset.from_generator(generator=data_utils.make_val_dataset,
+                                                 output_types=(tf.float32, tf.float32),
+                                                 output_shapes=(tf.TensorShape([None, None, 1]), tf.TensorShape([None, None, 1])),
+                                                 args=[val_image_paths, self.scale])
+        val_dataset = val_dataset.padded_batch(1, padded_shapes=([None, None, 1],[None, None, 1]))
+
+        # Make the iterator and its initializers
+        train_val_iterator = tf.data.Iterator.from_structure(train_dataset.output_types, train_dataset.output_shapes)
+        train_initializer = train_val_iterator.make_initializer(train_dataset)
+        val_initializer = train_val_iterator.make_initializer(val_dataset)
+
+        handle = tf.placeholder(tf.string, shape=[])
+        iterator = tf.data.Iterator.from_string_handle(handle, train_dataset.output_types, train_dataset.output_shapes)
+        LR, HR = iterator.get_next()
+
+        if not self.smallFlag:
+            print("\nRunning FSRCNN.")
+        else:
+            print("\nRunning FSRCNN-small.")
         out, loss, train_op, psnr = fsrcnn.model(LR, HR, self.lr_size, self.scale, self.batch, self.lr, self.fsrcnn_params)
         
         # -- Training session
@@ -55,20 +74,23 @@ class run:
                 if os.path.isfile(self.ckpt_path + "fsrcnn_ckpt" + ".meta"):
                     if self.load_flag:
                         saver.restore(sess, tf.train.latest_checkpoint(self.ckpt_path))
-                        print("\nLoaded checkpoint.")
+                        print("Loaded checkpoint.")
                     if not self.load_flag:
                         print("No checkpoint loaded. Training from scratch.")
                 else:
                     print("Previous checkpoint does not exists.")
 
+            train_val_handle = sess.run(train_val_iterator.string_handle())
+
             print("Training...")
-            for e in range(1, self.epochs):
-                sess.run(iter.initializer)
+            for e in range(1, self.epochs+1):
+                
+                sess.run(train_initializer)
                 step, train_loss, train_psnr = 0, 0, 0 
-    
+
                 while True:
                     try:
-                        o, l, t, ps = sess.run([out, loss, train_op, psnr])
+                        o, l, t, ps = sess.run([out, loss, train_op, psnr], feed_dict={handle: train_val_handle})
                         train_loss += l
                         train_psnr += (np.mean(np.asarray(ps)))
                         step += 1
@@ -81,71 +103,25 @@ class run:
                         break
 
                 # Perform end-of-epoch calculations here.
-                print("Epoch nr: [{}/{}]  - Loss: {:.5f} - Valid set PSNR: {:.3f}".format(e,
-                                                                                            self.epochs,
-                                                                                            float(train_loss/step),
-                                                                                            self.validTest()))
+                sess.run(val_initializer)
+                tot_val_psnr, val_im_cntr = 0, 0
+                try:
+                    while True:
+                        val_psnr = sess.run([psnr], feed_dict={handle:train_val_handle})
+
+                        tot_val_psnr += val_psnr[0]
+                        val_im_cntr += 1
+
+                except tf.errors.OutOfRangeError:
+                    pass
+                print("Epoch nr: [{}/{}]  - Loss: {:.5f} - val PSNR: {:.3f}\n".format(e,
+                                                                                      self.epochs,
+                                                                                      float(train_loss/step),
+                                                                                      (tot_val_psnr[0] / val_im_cntr)))
                 save_path = saver.save(sess, self.ckpt_path + "fsrcnn_ckpt")   
 
             print("Training finished.")
             train_writer.close()
-
-    def validTest(self):
-        """
-        Tests model on a validation set.
-        """
-        inputs = list()
-        tot_psnr = 0
-        im_cnt = 0
-        imageFolder = self.validdir
-        im_paths = data_utils.getpaths(imageFolder)
-
-        with tf.Session(config=self.config) as sessx:
-            
-            ckpt_name = self.ckpt_path + "fsrcnn_ckpt" + ".meta"
-            saverx = tf.train.import_meta_graph(ckpt_name)
-            saverx.restore(sessx, tf.train.latest_checkpoint(self.ckpt_path))
-            graph_def = sessx.graph
-            LR_tensor = graph_def.get_tensor_by_name("IteratorGetNext:0")
-            HR_tensor = graph_def.get_tensor_by_name("NHWC_output:0")
-
-            # prepare image, upscale and calc psnr
-            for p in im_paths:
-                
-                # read
-                fullimg = cv2.imread(p, 3)
-                width = fullimg.shape[0]
-                height = fullimg.shape[1]
-
-                # crop and downscale
-                cropped = fullimg[0:(width - (width % self.scale)), 0:(height - (height % self.scale)), :]
-                img = cv2.resize(cropped, None, fx=1. / self.scale, fy=1. / self.scale, interpolation=cv2.INTER_CUBIC)
-                
-                # to ycrcb and normalize
-                img_ycc = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
-                img_y = img_ycc[:,:,0]
-                floatimg = img_y.astype(np.float32) / 255.0
-
-                # expand_dims
-                inp = floatimg.reshape(1, floatimg.shape[0], floatimg.shape[1], 1)
-                
-                # through network
-                output = sessx.run(HR_tensor, feed_dict={LR_tensor: inp})
-
-                # post-process output
-                Y = output[0]
-                Y = (Y * 255.0).clip(min=0, max=255)
-                Y = (Y).astype(np.uint8)
-
-                # Merge with Chrominance channels Cr/Cb
-                Cr = np.expand_dims(cv2.resize(img_ycc[:,:,1], None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_CUBIC), axis=2)
-                Cb = np.expand_dims(cv2.resize(img_ycc[:,:,2], None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_CUBIC), axis=2)
-                HR_image = (cv2.cvtColor(np.concatenate((Y, Cr, Cb), axis=2), cv2.COLOR_YCrCb2BGR))
-
-                tot_psnr += self.psnr(cropped, HR_image)
-                im_cnt += 1
-        
-        return tot_psnr / im_cnt
 
     def upscale(self, path):
         """
@@ -186,6 +162,7 @@ class run:
             cv2.imshow('HR image', HR_image)
             cv2.imshow('Bicubic HR image', bicubic_image)
             cv2.waitKey(0)
+        sess.close()
 
     def test(self, path):
         """
@@ -242,8 +219,80 @@ class run:
             cv2.imwrite("./images/input.png", img)
             
             cv2.waitKey(0)
+        sess.close()
+        
+    def load_pb(self, path_to_pb):
+        with tf.gfile.GFile(path_to_pb, "rb") as f:
+            graph_def = tf.GraphDef()
+            graph_def.ParseFromString(f.read())
+        with tf.Graph().as_default() as graph:
+            tf.import_graph_def(graph_def, name='')
+            return graph
 
+    def testFromPb(self, path):
+        # Read model
+        pbPath = "./models/FSRCNN_x{}.pb".format(self.scale)
+        if self.smallFlag:
+            pbPath = "./models/FSRCNN-small_x{}.pb".format(self.scale)
+
+        # Get graph
+        graph = self.load_pb(pbPath)
+
+        fullimg = cv2.imread(path, 3)
+        width = fullimg.shape[0]
+        height = fullimg.shape[1]
+
+        cropped = fullimg[0:(width - (width % self.scale)), 0:(height - (height % self.scale)), :]
+        img = cv2.resize(cropped, None, fx=1. / self.scale, fy=1. / self.scale, interpolation=cv2.INTER_CUBIC)
+        
+        # to ycrcb and normalize
+        img_ycc = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+        img_y = img_ycc[:,:,0]
+        floatimg = img_y.astype(np.float32) / 255.0
+        
+        LR_input_ = floatimg.reshape(1, floatimg.shape[0], floatimg.shape[1], 1)
+
+        LR_tensor = graph.get_tensor_by_name("IteratorGetNext:0")
+        HR_tensor = graph.get_tensor_by_name("NHWC_output:0")
+
+        with tf.Session(graph=graph) as sess:
+            print("Loading pb...")
+            output = sess.run(HR_tensor, feed_dict={LR_tensor: LR_input_})
+            
+            # post-process
+            Y = output[0]
+            Y = (Y * 255.0).clip(min=0, max=255)
+            Y = (Y).astype(np.uint8)
+
+            # Merge with Chrominance channels Cr/Cb
+            Cr = np.expand_dims(cv2.resize(img_ycc[:,:,1], None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_CUBIC), axis=2)
+            Cb = np.expand_dims(cv2.resize(img_ycc[:,:,2], None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_CUBIC), axis=2)
+            HR_image = (cv2.cvtColor(np.concatenate((Y, Cr, Cb), axis=2), cv2.COLOR_YCrCb2BGR))
+
+            bicubic_image = cv2.resize(img, None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_CUBIC)
+
+            print("PSNR of FSRCNN  upscaled image: {}".format(self.psnr(cropped, HR_image)))
+            print("PSNR of bicubic upscaled image: {}".format(self.psnr(cropped, bicubic_image)))
+
+            cv2.imshow('Original image', fullimg)
+            cv2.imshow('FSRCNN upscaled image', HR_image)
+            cv2.imshow('Bicubic upscaled image', bicubic_image)
+
+            cv2.imwrite("./images/fsrcnnOutput.png", HR_image)
+            cv2.imwrite("./images/bicubicOutput.png", bicubic_image)
+            cv2.imwrite("./images/original.png", fullimg)
+            cv2.imwrite("./images/input.png", img)
+
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+        sess.close()
+    
     def export(self):
+
+        if not os.path.exists("./models"):
+            os.makedirs("./models")
+
         print("Exporting model...")
 
         graph = tf.get_default_graph()
@@ -268,7 +317,11 @@ class run:
 
                 graph_def = TransformGraph(graph_def, ["IteratorGetNext"], ["NCHW_output"], ["sort_by_execution_order"])
 
-                with tf.gfile.FastGFile('frozen_inference_graph_opt.pb', 'wb') as f:
+                pb_filename = "./models/FSRCNN_x{}.pb".format(self.scale)
+                if self.smallFlag:
+                    pb_filename = "./models/FSRCNN-small_x{}.pb".format(self.scale)
+                
+                with tf.gfile.FastGFile(pb_filename, 'wb') as f:
                     f.write(graph_def.SerializeToString())
 
                 tf.train.write_graph(graph_def, ".", 'train.pbtxt')
