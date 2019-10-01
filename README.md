@@ -6,7 +6,7 @@ This implementation replaces the transpose conv2d layer by a sub-pixel layer [2]
 Includes pretrained models for scales x2, x3 and x4. Which were trained on T91-image dataset, and finetuned on General100 dataset.
 
 ## Google Summer of Code with OpenCV
-This repository was made during the 2019 GSoC program for the organization OpenCV. The [trained models (.pb files)](https://github.com/Saafke/FSRCNN_Tensorflow/tree/master/models/) in this repo can easily be used for inference in OpenCV with the 'dnn_superres' module. See the OpenCV documentation for how to do this. (OpenCV Code not yet merged, so please wait for this feature.)
+This repository was made during the 2019 GSoC program for the organization OpenCV. The [trained models (.pb files)](https://github.com/Saafke/FSRCNN_Tensorflow/tree/master/models/) in this repo can easily be used for inference in OpenCV with the ['dnn_superres' module](https://github.com/opencv/opencv_contrib/tree/master/modules/dnn_superres). See the OpenCV documentation for how to do this.
 
 ## Requirements
 - Tensorflow
